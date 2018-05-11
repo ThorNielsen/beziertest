@@ -6,3 +6,4 @@ extern/
 *.o
 *.pnm
 *.png
+*.ttf

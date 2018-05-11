@@ -6,6 +6,7 @@
 #include <vector>
 #include <random>
 #include <thread>
+#include <sstream>
 
 #include "SFML/Graphics.hpp"
 #include "SFML/Graphics/CircleShape.hpp"
@@ -82,8 +83,17 @@ T sqLen(sf::Vector2<T> v)
     return v.x * v.x + v.y * v.y;
 }
 
+template <typename T>
+std::string toString(sf::Vector2<T> v)
+{
+    std::stringstream ss;
+    ss << "(" << v.x << ", " << v.y << ")";
+    return ss.str();
+}
+
 struct DrawArea
 {
+    sf::Font font;
     QBezier bezier;
     size_t getNearest(sf::Vector2i pos)
     {
@@ -133,9 +143,9 @@ void DrawArea::draw(sf::RenderWindow& wnd)
     sf::CircleShape cPoint;
     cPoint.setFillColor(Colour(0xffffff00));
     cPoint.setOutlineThickness(1.f);
-    cPoint.setOutlineColor(Colour(0x000000ff));
+    cPoint.setOutlineColor(Colour(0x003f1bff));
 
-    float radius = 3;
+    float radius = 5;
     cPoint.setRadius(radius);
     sf::VertexArray curveGuide(sf::LineStrip, 3);
     for (size_t i = 0; i < 3; ++i)
@@ -144,6 +154,13 @@ void DrawArea::draw(sf::RenderWindow& wnd)
         wnd.draw(cPoint);
         curveGuide[i].position = {bezier[i].x, bezier[i].y};
         curveGuide[i].color = Colour(0xafafafff);
+        sf::Text text;
+        text.setFont(font);
+        text.setString(toString(bezier[i]));
+        text.setCharacterSize(12);
+        text.setPosition(bezier[i].x+radius, bezier[i].y+radius);
+        text.setFillColor(Colour(0x2f5fafff));
+        wnd.draw(text);
     }
 
     wnd.draw(curveGuide);
@@ -163,6 +180,12 @@ int main()
     area.pos(0) = {100, 100};
     area.pos(1) = {400, 400};
     area.pos(2) = {700, 100};
+
+    if (!area.font.loadFromFile("font.ttf"))
+    {
+        std::cerr << "Error: Could not load font. Exiting.\n";
+        return 1;
+    }
 
     bool dragging = false;
     size_t dragIdx = 0;
@@ -192,7 +215,7 @@ int main()
                 auto mousepos = sf::Mouse::getPosition(wnd);
                 auto nearest = area.getNearest(mousepos);
                 auto sqDist = sqLen(area.pos(nearest)-mousepos);
-                if (sqDist < 10*10)
+                if (sqDist < 25*25)
                 {
                     dragging = true;
                     dragIdx = nearest;
