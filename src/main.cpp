@@ -20,10 +20,10 @@ struct Colour
     uint8_t a;
     Colour() : r{0}, g{0}, b{0}, a{255} {}
     Colour(uint8_t rx, uint8_t gx, uint8_t bx) : r{rx}, g{gx}, b{bx}, a{255} {}
-    Colour(uint32_t c) : r((c&0xFF0000)>>16),
-                          g((c&0xFF00)>>8),
-                          b(c&0xFF),
-                          a{255} {}
+    Colour(uint32_t c) : r((c&0xFF000000)>>24),
+                          g((c&0xFF0000)>>16),
+                          b((c&0xFF00)>>8),
+                          a(c&0xFF) {}
 
     operator sf::Color() const { return sf::Color(r, g, b, a); }
 };
@@ -46,6 +46,25 @@ struct QBezier
 {
     sf::Vector2i p0, p1, p2;
 
+    sf::Vector2i& operator[](size_t i)
+    {
+        switch (i)
+        {
+        case 0: return p0;
+        case 1: return p1;
+        case 2: return p2;
+        }
+    }
+    const sf::Vector2i& operator[](size_t i) const
+    {
+        switch (i)
+        {
+        case 0: return p0;
+        case 1: return p1;
+        case 2: return p2;
+        }
+    }
+
     void draw(sf::RenderWindow& wnd, Colour col);
 
     sf::Vector2f operator()(float t)
@@ -55,6 +74,36 @@ struct QBezier
         r.y = (1-t)*(1-t)*p0.y+2*(1-t)*t*p1.y+t*t*p2.y;
         return r;
     }
+};
+
+template <typename T>
+T sqLen(sf::Vector2<T> v)
+{
+    return v.x * v.x + v.y * v.y;
+}
+
+struct DrawArea
+{
+    QBezier bezier;
+    size_t getNearest(sf::Vector2i pos)
+    {
+        int smallest = std::numeric_limits<int>::max();
+        size_t nearest = 0;
+        for (size_t i = 0; i < 3; ++i)
+        {
+            auto d = sqLen(bezier[i]-pos);
+            if (d < smallest)
+            {
+                nearest = i;
+                smallest = d;
+            }
+        }
+        return nearest;
+    }
+    sf::Vector2i& pos(size_t i) { return bezier[i]; }
+    const sf::Vector2i& pos(size_t i) const { return bezier[i]; }
+
+    void draw(sf::RenderWindow& wnd);
 };
 
 void QBezier::draw(sf::RenderWindow& wnd, Colour col)
@@ -75,27 +124,31 @@ void QBezier::draw(sf::RenderWindow& wnd, Colour col)
     wnd.draw(curve);
 }
 
-void draw(sf::RenderWindow& wnd)
+void DrawArea::draw(sf::RenderWindow& wnd)
 {
     auto sz = wnd.getSize();
     wnd.setView(sf::View(sf::FloatRect(0, 0, sz.x, sz.y)));
-    wnd.clear(Colour(0xfdfaf1));
-
-    auto mousepos = sf::Mouse::getPosition(wnd);
-
-    QBezier bcurve;
-    bcurve.p0 = {10, 20};
-    bcurve.p1 = {532, 846};
-    bcurve.p2 = mousepos;
-    bcurve.draw(wnd, 0x000000);
+    wnd.clear(Colour(0xfdfaf1ff));
 
     sf::CircleShape cPoint;
-    cPoint.setFillColor(Colour(0xffffff));
+    cPoint.setFillColor(Colour(0xffffff00));
     cPoint.setOutlineThickness(1.f);
-    cPoint.setOutlineColor(Colour(0x000000));
-    cPoint.setRadius(3.f);
-    cPoint.setPosition(mousepos.x-4, mousepos.y-4);
-    wnd.draw(cPoint);
+    cPoint.setOutlineColor(Colour(0x000000ff));
+
+    float radius = 3;
+    cPoint.setRadius(radius);
+    sf::VertexArray curveGuide(sf::LineStrip, 3);
+    for (size_t i = 0; i < 3; ++i)
+    {
+        cPoint.setPosition(bezier[i].x-radius, bezier[i].y-radius);
+        wnd.draw(cPoint);
+        curveGuide[i].position = {bezier[i].x, bezier[i].y};
+        curveGuide[i].color = Colour(0xafafafff);
+    }
+
+    wnd.draw(curveGuide);
+
+    bezier.draw(wnd, 0x000000ff);
 
     wnd.display();
 }
@@ -103,22 +156,24 @@ void draw(sf::RenderWindow& wnd)
 int main()
 {
     std::ios_base::sync_with_stdio(false);
-    sf::ContextSettings cs;
-    cs.antialiasingLevel = 8;
-    sf::RenderWindow wnd(sf::VideoMode(1280, 720),
-                         "Bezier curves", sf::Style::Default, cs);
+    sf::RenderWindow wnd(sf::VideoMode(1280, 720), "Bezier curves");
     wnd.setVerticalSyncEnabled(true);
 
-    auto lastSize = wnd.getSize();
+    DrawArea area;
+    area.pos(0) = {100, 100};
+    area.pos(1) = {400, 400};
+    area.pos(2) = {700, 100};
 
-    bool needsRender = true;
+    bool dragging = false;
+    size_t dragIdx = 0;
 
-    bool isDragging = false;
+
     while (wnd.isOpen())
     {
         sf::Event evt;
         while (wnd.pollEvent(evt))
         {
+            bool shouldUpdateDraggedPosition = dragging;
             if (evt.type == sf::Event::Closed)
             {
                 wnd.close();
@@ -130,18 +185,35 @@ int main()
                     wnd.close();
                 }
             }
-            if (evt.type == sf::Event::MouseButtonPressed)
+            if (!dragging &&
+                evt.type == sf::Event::MouseButtonPressed &&
+                evt.mouseButton.button == sf::Mouse::Left)
             {
+                auto mousepos = sf::Mouse::getPosition(wnd);
+                auto nearest = area.getNearest(mousepos);
+                auto sqDist = sqLen(area.pos(nearest)-mousepos);
+                if (sqDist < 10*10)
+                {
+                    dragging = true;
+                    dragIdx = nearest;
+                    shouldUpdateDraggedPosition = true;
+                }
             }
-            if (evt.type == sf::Event::MouseMoved
-                && sf::Mouse::isButtonPressed(sf::Mouse::Left))
+
+            if (dragging &&
+                evt.type == sf::Event::MouseButtonReleased &&
+                evt.mouseButton.button == sf::Mouse::Left)
             {
+                dragging = false;
+                shouldUpdateDraggedPosition = true;
             }
-            if (evt.type == sf::Event::MouseButtonReleased
-                && evt.mouseButton.button == sf::Mouse::Left)
+
+            if (shouldUpdateDraggedPosition)
             {
+                area.pos(dragIdx) = sf::Mouse::getPosition(wnd);
             }
+
         }
-        draw(wnd);
+        area.draw(wnd);
     }
 }
