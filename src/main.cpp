@@ -163,6 +163,10 @@ struct DrawArea
         {
             intersections.push_back({bezier(t1), t1});
         }
+        if (intersections.size() == 2 && x0 < x1)
+        {
+            std::swap(intersections[0], intersections[1]);
+        }
         return intersections;
     }
 
@@ -211,7 +215,7 @@ void DrawArea::draw(sf::RenderWindow& wnd)
     cPoint.setRadius(radius);
     cPoint.setOutlineColor(Colour(0xff00ffff));
     text.setFillColor(Colour(0x3212afff));
-    bool placeAbove = false;
+    bool placeAbove = true;
     for (auto& intersection : approxIntersections())
     {
         cPoint.setPosition(intersection.point.x-radius,
