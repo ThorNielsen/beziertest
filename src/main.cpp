@@ -178,6 +178,7 @@ private:
     void drawPoints(sf::RenderWindow& wnd);
     void drawRay(sf::RenderWindow& wnd);
     void drawIntersections(sf::RenderWindow& wnd);
+    void drawInfo(sf::RenderWindow& wnd);
 
     sf::CircleShape setupPoint(Colour outline, float radius,
                                float thickness = 1.f)
@@ -302,6 +303,66 @@ void DrawArea::drawIntersections(sf::RenderWindow& wnd)
     }
 }
 
+void DrawArea::drawInfo(sf::RenderWindow& wnd)
+{
+    struct TextInfo
+    {
+        std::string text;
+        size_t size;
+        Colour colour;
+    };
+    std::vector<TextInfo> texts;
+    std::stringstream textBuf;
+    textBuf << "Exact intersections: " << " unimplemented." << "\n";
+    textBuf << "Approx intersections: " << approxIntersections().size() << "\n";
+    texts.push_back({textBuf.str(), 16, 0x000000ff});
+    textBuf.str({});
+    auto A = pos(0)-2*pos(1)+pos(2);
+    auto B = 2*(pos(1)-pos(0));
+    auto C = pos(0)-rayPos;
+    textBuf << "A: " << toString(A) << "\n";
+    textBuf << "B: " << toString(B) << "\n";
+    textBuf << "C: " << toString(C) << "\n";
+    texts.push_back({textBuf.str(), 12, 0x121212ff});
+    textBuf.clear();
+
+    // Trim last newline of last text in order to fit background rectangle to
+    // actual text area.
+    if (texts.back().text.size() && texts.back().text.back() == '\n')
+    {
+        texts.back().text.pop_back();
+    }
+
+    std::vector<sf::Text> renderTexts;
+    sf::Vector2f dim{0, 0};
+    for (auto& info : texts)
+    {
+        renderTexts.push_back({});
+        sf::Text& text = renderTexts.back();
+        text.setFont(font);
+        text.setCharacterSize(info.size);
+        text.setFillColor(info.colour);
+        text.setString(info.text);
+        auto bounds = text.getLocalBounds();
+        dim.x = std::max(dim.x, bounds.width - bounds.left);
+        dim.y += bounds.height + bounds.top;
+    }
+    sf::Vector2f topleft;
+    topleft.x = wnd.getSize().x-dim.x;
+    topleft.y = 0;
+    sf::RectangleShape bg;
+    bg.setPosition(topleft);
+    bg.setSize(dim);
+    bg.setFillColor(Colour(0x0000001a));
+    wnd.draw(bg);
+    for (auto& text : renderTexts)
+    {
+        text.setPosition(topleft);
+        wnd.draw(text);
+        topleft.y += text.getLocalBounds().height;
+    }
+}
+
 void DrawArea::draw(sf::RenderWindow& wnd)
 {
     auto sz = wnd.getSize();
@@ -312,6 +373,7 @@ void DrawArea::draw(sf::RenderWindow& wnd)
     drawRay(wnd);
     drawPoints(wnd);
     drawIntersections(wnd);
+    drawInfo(wnd);
 
     wnd.display();
 }
