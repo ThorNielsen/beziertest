@@ -162,13 +162,15 @@ public:
 
     std::vector<Intersection> approxIntersections();
 
+    size_t exactIntersectionCount();
+
     sf::Vector2i& pos(size_t i) { return (i==3) ? rayPos : bezier[i]; }
     const sf::Vector2i& pos(size_t i) const
     {
         return (i==3) ? rayPos : bezier[i];
     }
 
-    void draw(sf::RenderWindow& wnd);
+    void draw(sf::RenderWindow& wnd, bool isConsistent);
 
 private:
     sf::Font font;
@@ -178,7 +180,7 @@ private:
     void drawPoints(sf::RenderWindow& wnd);
     void drawRay(sf::RenderWindow& wnd);
     void drawIntersections(sf::RenderWindow& wnd);
-    void drawInfo(sf::RenderWindow& wnd);
+    void drawInfo(sf::RenderWindow& wnd, bool isConsistent);
 
     sf::CircleShape setupPoint(Colour outline, float radius,
                                float thickness = 1.f)
@@ -230,6 +232,11 @@ std::vector<DrawArea::Intersection> DrawArea::approxIntersections()
     return intersections;
 }
 
+size_t DrawArea::exactIntersectionCount()
+{
+    return 1;
+}
+
 void DrawArea::drawBezier(sf::RenderWindow& wnd)
 {
     sf::VertexArray curveGuide(sf::LineStrip, 3);
@@ -258,7 +265,8 @@ void DrawArea::drawPoints(sf::RenderWindow& wnd)
         point.setPosition(pos(i).x-radius, pos(i).y-radius);
         wnd.draw(point);
         text.setString(toString(pos(i)));
-        text.setPosition(pos(i).x+radius, pos(i).y+radius);
+        text.setPosition(pos(i).x+radius-text.getLocalBounds().left,
+                         pos(i).y+radius-text.getLocalBounds().top);
         wnd.draw(text);
     }
 }
@@ -287,23 +295,25 @@ void DrawArea::drawIntersections(sf::RenderWindow& wnd)
                            intersection.point.y-radius);
         wnd.draw(point);
         text.setString((std::string)intersection);
+        auto placeAt = intersection.point;
         if (placeAbove)
         {
             auto dim = text.getLocalBounds();
-            text.setPosition((int)(intersection.point.x-radius-dim.width),
-                             (int)(intersection.point.y-radius-dim.height));
+            placeAt.x = int(placeAt.x - radius - dim.width - dim.left);
+            placeAt.y = int(placeAt.y - radius - dim.height - dim.top);
         }
         else
         {
-            text.setPosition((int)(intersection.point.x+radius+0.5),
-                             (int)(intersection.point.y+radius+0.5));
+            placeAt.x = (int)(intersection.point.x + radius);
+            placeAt.y = (int)(intersection.point.y + radius);
         }
+        text.setPosition(placeAt);
         wnd.draw(text);
         placeAbove = !placeAbove;
     }
 }
 
-void DrawArea::drawInfo(sf::RenderWindow& wnd)
+void DrawArea::drawInfo(sf::RenderWindow& wnd, bool isConsistent)
 {
     struct TextInfo
     {
@@ -313,7 +323,11 @@ void DrawArea::drawInfo(sf::RenderWindow& wnd)
     };
     std::vector<TextInfo> texts;
     std::stringstream textBuf;
-    textBuf << "Exact intersections: " << " unimplemented." << "\n";
+    if (!isConsistent)
+    {
+        texts.push_back({"Inconsistent results!!!\n", 24, 0xff0000ff});
+    }
+    textBuf << "Exact intersections: " << exactIntersectionCount() << "\n";
     textBuf << "Approx intersections: " << approxIntersections().size() << "\n";
     texts.push_back({textBuf.str(), 16, 0x000000ff});
     textBuf.str({});
@@ -324,7 +338,9 @@ void DrawArea::drawInfo(sf::RenderWindow& wnd)
     textBuf << "B: " << toString(B) << "\n";
     textBuf << "C: " << toString(C) << "\n";
     texts.push_back({textBuf.str(), 12, 0x121212ff});
-    textBuf.clear();
+    textBuf.str({});
+
+
 
     // Trim last newline of last text in order to fit background rectangle to
     // actual text area.
@@ -344,8 +360,8 @@ void DrawArea::drawInfo(sf::RenderWindow& wnd)
         text.setFillColor(info.colour);
         text.setString(info.text);
         auto bounds = text.getLocalBounds();
-        dim.x = std::max(dim.x, bounds.width - bounds.left);
-        dim.y += bounds.height + bounds.top;
+        dim.x = std::max(dim.x, bounds.width);
+        dim.y += bounds.height;
     }
     sf::Vector2f topleft;
     topleft.x = wnd.getSize().x-dim.x;
@@ -357,13 +373,14 @@ void DrawArea::drawInfo(sf::RenderWindow& wnd)
     wnd.draw(bg);
     for (auto& text : renderTexts)
     {
-        text.setPosition(topleft);
+        text.setPosition(topleft.x-text.getLocalBounds().left,
+                         topleft.y);
         wnd.draw(text);
-        topleft.y += text.getLocalBounds().height;
+        topleft.y += text.getLocalBounds().height-text.getLocalBounds().top;
     }
 }
 
-void DrawArea::draw(sf::RenderWindow& wnd)
+void DrawArea::draw(sf::RenderWindow& wnd, bool isConsistent)
 {
     auto sz = wnd.getSize();
     wnd.setView(sf::View(sf::FloatRect(0, 0, sz.x, sz.y)));
@@ -373,7 +390,7 @@ void DrawArea::draw(sf::RenderWindow& wnd)
     drawRay(wnd);
     drawPoints(wnd);
     drawIntersections(wnd);
-    drawInfo(wnd);
+    drawInfo(wnd, isConsistent);
 
     wnd.display();
 }
@@ -389,9 +406,21 @@ int main()
     bool dragging = false;
     size_t dragIdx = 0;
 
+    bool isConsistent = true;
 
     while (wnd.isOpen())
     {
+        if (isConsistent &&
+            area.approxIntersections().size() != area.exactIntersectionCount())
+        {
+            isConsistent = false;
+            dragging = false;
+        }
+        if (!isConsistent &&
+            area.approxIntersections().size() == area.exactIntersectionCount())
+        {
+            isConsistent = true;
+        }
         sf::Event evt;
         while (wnd.pollEvent(evt))
         {
@@ -438,7 +467,7 @@ int main()
                 area.pos(dragIdx) = desiredPos;
             }
         }
-        area.draw(wnd);
+        area.draw(wnd, isConsistent);
 
     }
 }
