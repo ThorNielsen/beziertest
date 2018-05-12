@@ -13,6 +13,12 @@
 #include "SFML/Window.hpp"
 #include "SFML/Window/ContextSettings.hpp"
 
+template <typename T>
+inline T clamp(T val, T min, T max)
+{
+    return std::max(std::min(val, max), min);
+}
+
 struct Colour
 {
     uint8_t r;
@@ -95,6 +101,7 @@ struct DrawArea
 {
     sf::Font font;
     QBezier bezier;
+    sf::Vector2i rayPos;
     size_t getNearest(sf::Vector2i pos)
     {
         int smallest = std::numeric_limits<int>::max();
@@ -108,10 +115,14 @@ struct DrawArea
                 smallest = d;
             }
         }
+        if (sqLen(rayPos - pos) < smallest) return 3;
         return nearest;
     }
-    sf::Vector2i& pos(size_t i) { return bezier[i]; }
-    const sf::Vector2i& pos(size_t i) const { return bezier[i]; }
+    sf::Vector2i& pos(size_t i) { return (i==3) ? rayPos : bezier[i]; }
+    const sf::Vector2i& pos(size_t i) const
+    {
+        return (i==3) ? rayPos : bezier[i];
+    }
 
     void draw(sf::RenderWindow& wnd);
 };
@@ -123,7 +134,7 @@ void QBezier::draw(sf::RenderWindow& wnd, Colour col)
     len += std::sqrt(d.x*d.x+d.y*d.y);
     d = p1-p0;
     len += std::sqrt(d.x*d.x+d.y*d.y);
-    size_t subdiv = std::max<size_t>(8, len/5);
+    size_t subdiv = std::max<size_t>(8, len);
     sf::VertexArray curve(sf::LineStrip, subdiv+1);
     for (size_t i = 0; i <= subdiv; ++i)
     {
@@ -148,22 +159,31 @@ void DrawArea::draw(sf::RenderWindow& wnd)
     float radius = 5;
     cPoint.setRadius(radius);
     sf::VertexArray curveGuide(sf::LineStrip, 3);
-    for (size_t i = 0; i < 3; ++i)
+    for (size_t i = 0; i < 4; ++i)
     {
-        cPoint.setPosition(bezier[i].x-radius, bezier[i].y-radius);
+        cPoint.setPosition(pos(i).x-radius, pos(i).y-radius);
         wnd.draw(cPoint);
-        curveGuide[i].position = {bezier[i].x, bezier[i].y};
-        curveGuide[i].color = Colour(0xafafafff);
+        if (i < 3)
+        {
+            curveGuide[i].position = {pos(i).x, pos(i).y};
+            curveGuide[i].color = Colour(0xafafafff);
+        }
         sf::Text text;
         text.setFont(font);
-        text.setString(toString(bezier[i]));
+        text.setString(toString(pos(i)));
         text.setCharacterSize(12);
-        text.setPosition(bezier[i].x+radius, bezier[i].y+radius);
+        text.setPosition(pos(i).x+radius, pos(i).y+radius);
         text.setFillColor(Colour(0x2f5fafff));
         wnd.draw(text);
     }
 
     wnd.draw(curveGuide);
+
+    sf::VertexArray ray(sf::Lines, 2);
+    ray[0].position = {pos(3).x, pos(3).y};
+    ray[1].position = {wnd.getSize().x, pos(3).y};
+    ray[0].color = ray[1].color = Colour(0xff6c1dff);
+    wnd.draw(ray);
 
     bezier.draw(wnd, 0x000000ff);
 
@@ -180,6 +200,7 @@ int main()
     area.pos(0) = {100, 100};
     area.pos(1) = {400, 400};
     area.pos(2) = {700, 100};
+    area.pos(3) = {400, 200};
 
     if (!area.font.loadFromFile("font.ttf"))
     {
@@ -194,8 +215,12 @@ int main()
     while (wnd.isOpen())
     {
         sf::Event evt;
+        bool redraw = false;
         while (wnd.pollEvent(evt))
         {
+            // Todo: Redraw only if necessary.
+            redraw = true;
+
             bool shouldUpdateDraggedPosition = dragging;
             if (evt.type == sf::Event::Closed)
             {
@@ -233,10 +258,16 @@ int main()
 
             if (shouldUpdateDraggedPosition)
             {
-                area.pos(dragIdx) = sf::Mouse::getPosition(wnd);
+                auto desiredPos = sf::Mouse::getPosition(wnd);
+                desiredPos.x = clamp<int>(desiredPos.x, 0, wnd.getSize().x);
+                desiredPos.y = clamp<int>(desiredPos.y, 0, wnd.getSize().y);
+                area.pos(dragIdx) = desiredPos;
             }
-
         }
-        area.draw(wnd);
+        if (redraw)
+        {
+            area.draw(wnd);
+        }
+
     }
 }
