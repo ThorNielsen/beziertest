@@ -83,6 +83,24 @@ struct QBezier
     }
 };
 
+void QBezier::draw(sf::RenderWindow& wnd, Colour col)
+{
+    float len{0};
+    auto d = p2-p1;
+    len += std::sqrt(d.x*d.x+d.y*d.y);
+    d = p1-p0;
+    len += std::sqrt(d.x*d.x+d.y*d.y);
+    size_t subdiv = std::max<size_t>(8, len);
+    sf::VertexArray curve(sf::LineStrip, subdiv+1);
+    for (size_t i = 0; i <= subdiv; ++i)
+    {
+        auto t = static_cast<float>(i)/static_cast<float>(subdiv);
+        curve[i].position = (*this)(t);
+        curve[i].color = col;
+    }
+    wnd.draw(curve);
+}
+
 template <typename T>
 T sqLen(sf::Vector2<T> v)
 {
@@ -97,11 +115,21 @@ std::string toString(sf::Vector2<T> v)
     return ss.str();
 }
 
-struct DrawArea
+class DrawArea
 {
-    sf::Font font;
-    QBezier bezier;
-    sf::Vector2i rayPos;
+public:
+    DrawArea()
+    {
+        pos(0) = {100, 100};
+        pos(1) = {400, 400};
+        pos(2) = {700, 100};
+        pos(3) = {400, 200};
+
+        if (!font.loadFromFile("font.ttf"))
+        {
+            throw std::runtime_error("Could not load font.");
+        }
+    }
     size_t getNearest(sf::Vector2i pos)
     {
         int smallest = std::numeric_limits<int>::max();
@@ -132,43 +160,7 @@ struct DrawArea
         }
     };
 
-    std::vector<Intersection> approxIntersections()
-    {
-        std::vector<Intersection> intersections;
-        auto A = pos(0)-2*pos(1)+pos(2);
-        auto B = 2*(pos(1)-pos(0));
-        auto C = pos(0)-rayPos;
-        auto dy = B.y * B.y - 4 * A.y * C.y;
-        if (dy < 0) return intersections;
-        if (!dy)
-        {
-            float t = -B.y / (float)(2*A.y);
-            float x = A.x*t*t+B.x*t+C.x;
-            if (0 <= x && 0 <= t && t <= 1)
-            {
-                intersections.push_back({bezier(t), t});
-            }
-            return intersections;
-        }
-        float rt = std::sqrt((float)dy);
-        float t0 = (-B.y+rt) / (float)(2*A.y);
-        float x0 = A.x*t0*t0+B.x*t0+C.x;
-        if (0 <= x0 && 0 <= t0 && t0 <= 1)
-        {
-            intersections.push_back({bezier(t0), t0});
-        }
-        float t1 = (-B.y-rt) / (float)(2*A.y);
-        float x1 = A.x*t1*t1+B.x*t1+C.x;
-        if (0 <= x1 && 0 <= t1 && t1 <= 1)
-        {
-            intersections.push_back({bezier(t1), t1});
-        }
-        if (intersections.size() == 2 && x0 < x1)
-        {
-            std::swap(intersections[0], intersections[1]);
-        }
-        return intersections;
-    }
+    std::vector<Intersection> approxIntersections();
 
     sf::Vector2i& pos(size_t i) { return (i==3) ? rayPos : bezier[i]; }
     const sf::Vector2i& pos(size_t i) const
@@ -177,50 +169,122 @@ struct DrawArea
     }
 
     void draw(sf::RenderWindow& wnd);
+
+private:
+    sf::Font font;
+    QBezier bezier;
+    sf::Vector2i rayPos;
+    void drawBezier(sf::RenderWindow& wnd);
+    void drawPoints(sf::RenderWindow& wnd);
+    void drawRay(sf::RenderWindow& wnd);
+    void drawIntersections(sf::RenderWindow& wnd);
+
+    sf::CircleShape setupPoint(Colour outline, float radius,
+                               float thickness = 1.f)
+    {
+        sf::CircleShape point;
+        point.setFillColor(Colour(0xffffff00));
+        point.setOutlineThickness(thickness);
+        point.setRadius(radius);
+        point.setOutlineColor(outline);
+        return point;
+    }
 };
 
-void QBezier::draw(sf::RenderWindow& wnd, Colour col)
+std::vector<DrawArea::Intersection> DrawArea::approxIntersections()
 {
-    float len{0};
-    auto d = p2-p1;
-    len += std::sqrt(d.x*d.x+d.y*d.y);
-    d = p1-p0;
-    len += std::sqrt(d.x*d.x+d.y*d.y);
-    size_t subdiv = std::max<size_t>(8, len);
-    sf::VertexArray curve(sf::LineStrip, subdiv+1);
-    for (size_t i = 0; i <= subdiv; ++i)
+    std::vector<Intersection> intersections;
+    auto A = pos(0)-2*pos(1)+pos(2);
+    auto B = 2*(pos(1)-pos(0));
+    auto C = pos(0)-rayPos;
+    auto dy = B.y * B.y - 4 * A.y * C.y;
+    if (dy < 0) return intersections;
+    if (!dy)
     {
-        auto t = static_cast<float>(i)/static_cast<float>(subdiv);
-        curve[i].position = (*this)(t);
-        curve[i].color = col;
+        float t = -B.y / (float)(2*A.y);
+        float x = A.x*t*t+B.x*t+C.x;
+        if (0 <= x && 0 <= t && t <= 1)
+        {
+            intersections.push_back({bezier(t), t});
+        }
+        return intersections;
     }
-    wnd.draw(curve);
+    float rt = std::sqrt((float)dy);
+    float t0 = (-B.y+rt) / (float)(2*A.y);
+    float x0 = A.x*t0*t0+B.x*t0+C.x;
+    if (0 <= x0 && 0 <= t0 && t0 <= 1)
+    {
+        intersections.push_back({bezier(t0), t0});
+    }
+    float t1 = (-B.y-rt) / (float)(2*A.y);
+    float x1 = A.x*t1*t1+B.x*t1+C.x;
+    if (0 <= x1 && 0 <= t1 && t1 <= 1)
+    {
+        intersections.push_back({bezier(t1), t1});
+    }
+    if (intersections.size() == 2 && x0 < x1)
+    {
+        std::swap(intersections[0], intersections[1]);
+    }
+    return intersections;
 }
 
-void DrawArea::draw(sf::RenderWindow& wnd)
+void DrawArea::drawBezier(sf::RenderWindow& wnd)
 {
-    auto sz = wnd.getSize();
-    wnd.setView(sf::View(sf::FloatRect(0, 0, sz.x, sz.y)));
-    wnd.clear(Colour(0xfdfaf1ff));
+    sf::VertexArray curveGuide(sf::LineStrip, 3);
 
-    sf::CircleShape cPoint;
-    cPoint.setFillColor(Colour(0xffffff00));
-    cPoint.setOutlineThickness(1.f);
+    for (size_t i = 0; i < 3; ++i)
+    {
+        curveGuide[i].position = {pos(i).x, pos(i).y};
+        curveGuide[i].color = Colour(0xafafafff);
+    }
 
+    wnd.draw(curveGuide);
+
+    bezier.draw(wnd, 0x000000ff);
+}
+
+void DrawArea::drawPoints(sf::RenderWindow& wnd)
+{
+    auto radius = 5.f;
+    auto point = setupPoint(0x003f1bff, radius);
     sf::Text text;
     text.setFont(font);
     text.setCharacterSize(12);
+    text.setFillColor(Colour(0x2f5fafff));
+    for (size_t i = 0; i < 4; ++i)
+    {
+        point.setPosition(pos(i).x-radius, pos(i).y-radius);
+        wnd.draw(point);
+        text.setString(toString(pos(i)));
+        text.setPosition(pos(i).x+radius, pos(i).y+radius);
+        wnd.draw(text);
+    }
+}
 
-    float radius = 3;
-    cPoint.setRadius(radius);
-    cPoint.setOutlineColor(Colour(0xff00ffff));
+void DrawArea::drawRay(sf::RenderWindow& wnd)
+{
+    sf::VertexArray ray(sf::Lines, 2);
+    ray[0].position = {pos(3).x, pos(3).y};
+    ray[1].position = {wnd.getSize().x, pos(3).y};
+    ray[0].color = ray[1].color = Colour(0xff6c1dff);
+    wnd.draw(ray);
+}
+
+void DrawArea::drawIntersections(sf::RenderWindow& wnd)
+{
+    sf::Text text;
+    text.setFont(font);
+    text.setCharacterSize(12);
     text.setFillColor(Colour(0x3212afff));
+    float radius = 3.f;
+    auto point = setupPoint(0xff00ffff, radius);
     bool placeAbove = true;
     for (auto& intersection : approxIntersections())
     {
-        cPoint.setPosition(intersection.point.x-radius,
+        point.setPosition(intersection.point.x-radius,
                            intersection.point.y-radius);
-        wnd.draw(cPoint);
+        wnd.draw(point);
         text.setString((std::string)intersection);
         if (placeAbove)
         {
@@ -236,38 +300,18 @@ void DrawArea::draw(sf::RenderWindow& wnd)
         wnd.draw(text);
         placeAbove = !placeAbove;
     }
+}
 
+void DrawArea::draw(sf::RenderWindow& wnd)
+{
+    auto sz = wnd.getSize();
+    wnd.setView(sf::View(sf::FloatRect(0, 0, sz.x, sz.y)));
+    wnd.clear(Colour(0xfdfaf1ff));
 
-    cPoint.setOutlineColor(Colour(0x003f1bff));
-    radius = 5;
-    cPoint.setRadius(radius);
-
-    sf::VertexArray curveGuide(sf::LineStrip, 3);
-    text.setFillColor(Colour(0x2f5fafff));
-
-    for (size_t i = 0; i < 4; ++i)
-    {
-        cPoint.setPosition(pos(i).x-radius, pos(i).y-radius);
-        wnd.draw(cPoint);
-        if (i < 3)
-        {
-            curveGuide[i].position = {pos(i).x, pos(i).y};
-            curveGuide[i].color = Colour(0xafafafff);
-        }
-        text.setString(toString(pos(i)));
-        text.setPosition(pos(i).x+radius, pos(i).y+radius);
-        wnd.draw(text);
-    }
-
-    wnd.draw(curveGuide);
-
-    sf::VertexArray ray(sf::Lines, 2);
-    ray[0].position = {pos(3).x, pos(3).y};
-    ray[1].position = {wnd.getSize().x, pos(3).y};
-    ray[0].color = ray[1].color = Colour(0xff6c1dff);
-
-    bezier.draw(wnd, 0x000000ff);
-    wnd.draw(ray);
+    drawBezier(wnd);
+    drawRay(wnd);
+    drawPoints(wnd);
+    drawIntersections(wnd);
 
     wnd.display();
 }
@@ -279,16 +323,6 @@ int main()
     wnd.setVerticalSyncEnabled(true);
 
     DrawArea area;
-    area.pos(0) = {100, 100};
-    area.pos(1) = {400, 400};
-    area.pos(2) = {700, 100};
-    area.pos(3) = {400, 200};
-
-    if (!area.font.loadFromFile("font.ttf"))
-    {
-        std::cerr << "Error: Could not load font. Exiting.\n";
-        return 1;
-    }
 
     bool dragging = false;
     size_t dragIdx = 0;
