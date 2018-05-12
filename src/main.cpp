@@ -293,12 +293,8 @@ int main()
     while (wnd.isOpen())
     {
         sf::Event evt;
-        bool redraw = false;
         while (wnd.pollEvent(evt))
         {
-            // Todo: Redraw only if necessary.
-            redraw = true;
-
             bool shouldUpdateDraggedPosition = dragging;
             if (evt.type == sf::Event::Closed)
             {
@@ -342,10 +338,7 @@ int main()
                 area.pos(dragIdx) = desiredPos;
             }
         }
-        if (redraw)
-        {
-            area.draw(wnd);
-        }
+        area.draw(wnd);
 
     }
 }
