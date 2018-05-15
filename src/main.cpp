@@ -265,7 +265,11 @@ size_t DrawArea::exactIntersectionCount()
     }
 
     if (D < 0) return 0;
-    if (D == 0) return 1; // Need to check that t in range [0, 1].
+    if (D == 0)
+    {
+        if (A > 0) return B < 0 && (-B < 2*A);
+        return B > 0 && (-B > 2*A);
+    }
 
 
     bool minusGood = false;
