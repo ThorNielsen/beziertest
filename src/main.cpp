@@ -7,6 +7,7 @@
 #include <random>
 #include <thread>
 #include <sstream>
+#include <iomanip>
 
 #include <SFML/Graphics.hpp>
 #include <SFML/Graphics/CircleShape.hpp>
@@ -242,8 +243,7 @@ std::vector<DrawArea::Intersection> DrawArea::approxIntersections()
     return intersections;
 }
 
-// Note: Currently only tests for line-bezier segment-intersections. It is also
-// somewhat buggy at the moment.
+// Note: Currently only tests for line-bezier segment-intersections.
 size_t DrawArea::exactIntersectionCount()
 {
     auto e = bezier.p0.y;
@@ -280,8 +280,20 @@ size_t DrawArea::exactIntersectionCount()
     if (e<g) plusGood = e<b;
     else plusGood = A > 0;
 
-    if (k > g && k <= b) plusGood = false;
-    if (k < g && k >= b) minusGood = false;
+    // These can also be used instead of the following two tests.
+    //if ((k > g && k <= b) || (k <= g && A >= 0)) plusGood = false;
+    //if ((k < g && k >= b) || (k >= g && A <= 0)) minusGood = false;
+    if (plusGood)
+    {
+        if (k > g) plusGood = k > b;
+        else plusGood = A < 0;
+    }
+    if (minusGood)
+    {
+        if (k < g) minusGood = k < b;
+        else minusGood = A > 0;
+    }
+
 
     auto d = bezier.p0.x;
     auto f = bezier.p1.x;
@@ -412,6 +424,15 @@ void DrawArea::drawInfo(sf::RenderWindow& wnd, bool isConsistent)
     textBuf << "C: " << toString(C) << "\n";
     texts.push_back({textBuf.str(), 12, 0x121212ff});
     textBuf.str({});
+    textBuf << "a: " << std::setw(4) << rayPos.x << "      ";
+    textBuf << "b: " << std::setw(4) << rayPos.y << "\n";
+    textBuf << "d: " << std::setw(4) << pos(0).x << "      ";
+    textBuf << "e: " << std::setw(4) << pos(0).y << "\n";
+    textBuf << "f: " << std::setw(4) << pos(1).x << "      ";
+    textBuf << "g: " << std::setw(4) << pos(1).y << "\n";
+    textBuf << "h: " << std::setw(4) << pos(2).x << "      ";
+    textBuf << "k: " << std::setw(4) << pos(2).y << "\n";
+    texts.push_back({textBuf.str(), 10, 0x303030ff});
 
     std::vector<sf::Text> renderTexts;
     sf::Vector2f dim{0, 0};
