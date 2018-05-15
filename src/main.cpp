@@ -8,10 +8,10 @@
 #include <thread>
 #include <sstream>
 
-#include "SFML/Graphics.hpp"
-#include "SFML/Graphics/CircleShape.hpp"
-#include "SFML/Window.hpp"
-#include "SFML/Window/ContextSettings.hpp"
+#include <SFML/Graphics.hpp>
+#include <SFML/Graphics/CircleShape.hpp>
+#include <SFML/Window.hpp>
+#include <SFML/Window/ContextSettings.hpp>
 
 template <typename T>
 inline T clamp(T val, T min, T max)
@@ -201,12 +201,22 @@ std::vector<DrawArea::Intersection> DrawArea::approxIntersections()
     auto B = 2*(pos(1)-pos(0));
     auto C = pos(0)-rayPos;
     auto dy = B.y * B.y - 4 * A.y * C.y;
+    if (!A.y)
+    {
+        float t = -(float)C.y/(float)B.y;
+        float x = A.x*t*t+B.x*t+C.x;
+        if (0 <= x && 0 < t && t < 1)
+        {
+            intersections.push_back({bezier(t), t});
+        }
+        return intersections;
+    }
     if (dy < 0) return intersections;
     if (!dy)
     {
         float t = -B.y / (float)(2*A.y);
         float x = A.x*t*t+B.x*t+C.x;
-        if (0 <= x && 0 <= t && t <= 1)
+        if (0 <= x && 0 < t && t < 1)
         {
             intersections.push_back({bezier(t), t});
         }
@@ -215,13 +225,13 @@ std::vector<DrawArea::Intersection> DrawArea::approxIntersections()
     float rt = std::sqrt((float)dy);
     float t0 = (-B.y+rt) / (float)(2*A.y);
     float x0 = A.x*t0*t0+B.x*t0+C.x;
-    if (0 <= x0 && 0 <= t0 && t0 <= 1)
+    if (0 <= x0 && 0 < t0 && t0 < 1)
     {
         intersections.push_back({bezier(t0), t0});
     }
     float t1 = (-B.y-rt) / (float)(2*A.y);
     float x1 = A.x*t1*t1+B.x*t1+C.x;
-    if (0 <= x1 && 0 <= t1 && t1 <= 1)
+    if (0 <= x1 && 0 < t1 && t1 < 1)
     {
         intersections.push_back({bezier(t1), t1});
     }
@@ -232,9 +242,72 @@ std::vector<DrawArea::Intersection> DrawArea::approxIntersections()
     return intersections;
 }
 
+// Note: Currently only tests for line-bezier segment-intersections. It is also
+// somewhat buggy at the moment.
 size_t DrawArea::exactIntersectionCount()
 {
-    return 1;
+    auto e = bezier.p0.y;
+    auto g = bezier.p1.y;
+    auto k = bezier.p2.y;
+    auto b = rayPos.y;
+
+    auto A = e-2*g+k;
+    auto B = 2*(g-e);
+    auto C = e-b;
+
+    auto D = B*B-4*A*C;
+
+    if (A == 0)
+    {
+        if (B == 0) return C == 0;
+        if (B > 0) return 0 > C && C > -B;
+        return 0 < C && C < -B;
+    }
+
+    if (D < 0) return 0;
+    if (D == 0) return 1; // Need to check that t in range [0, 1].
+
+
+    bool minusGood = false;
+    bool plusGood = false;
+
+    // sign(e-g) [equiv. e>g, e=g, e<g] and sign(A) can be precomputed.
+
+    // Check that t >= 0 for minus solution.
+    if (e>g) minusGood = e>b;
+    else minusGood = A < 0;
+
+    if (e<g) plusGood = e<b;
+    else plusGood = A > 0;
+
+    if (k > g && k <= b) plusGood = false;
+    if (k < g && k >= b) minusGood = false;
+
+    auto d = bezier.p0.x;
+    auto f = bezier.p1.x;
+    auto h = bezier.p2.x;
+    auto a = rayPos.x;
+
+    auto E = d-2*f+h;
+    auto F = 2*(f-d);
+    auto G = d-a;
+
+    // The following is just a single bit and can be precomputed.
+    bool minusFirst = (g-e)*(h-f)+(k-g)*(d-f) < 0;
+    if (e < g) minusFirst = !minusFirst;
+
+    bool lowSol = minusGood;
+    bool highSol = plusGood;
+
+    if (!minusFirst)
+    {
+        // The highest t value gives the solution with the lowest x value -
+        // equivalently the minus solution gives the solution with the highest
+        // t value.
+        std::swap(lowSol, highSol);
+    }
+
+    return lowSol+highSol;
 }
 
 void DrawArea::drawBezier(sf::RenderWindow& wnd)
@@ -340,15 +413,6 @@ void DrawArea::drawInfo(sf::RenderWindow& wnd, bool isConsistent)
     texts.push_back({textBuf.str(), 12, 0x121212ff});
     textBuf.str({});
 
-
-
-    // Trim last newline of last text in order to fit background rectangle to
-    // actual text area.
-    if (texts.back().text.size() && texts.back().text.back() == '\n')
-    {
-        texts.back().text.pop_back();
-    }
-
     std::vector<sf::Text> renderTexts;
     sf::Vector2f dim{0, 0};
     for (auto& info : texts)
@@ -361,7 +425,7 @@ void DrawArea::drawInfo(sf::RenderWindow& wnd, bool isConsistent)
         text.setString(info.text);
         auto bounds = text.getLocalBounds();
         dim.x = std::max(dim.x, bounds.width);
-        dim.y += bounds.height;
+        dim.y += bounds.height-bounds.top;
     }
     sf::Vector2f topleft;
     topleft.x = wnd.getSize().x-dim.x;
