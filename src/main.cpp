@@ -267,8 +267,11 @@ std::vector<DrawArea::Intersection> DrawArea::approxIntersections()
     return intersections;
 }
 
-// Note: This uses floating-point arithmetic in some cases since the exact
-// expressions are too complicated (and possibly requiring very large numbers).
+// The derivation (and an explanation) of this function can be found in the
+// notes folder. The discrepancy between the variable names is due to the
+// derivation being done on paper first (where single-letter variable names are
+// easier to write and distinguish), then being tested here and finally being
+// typeset in LaTeX.
 size_t DrawArea::accurateIntersectionCount()
 {
     auto e = bezier.p0.y;
@@ -312,7 +315,7 @@ size_t DrawArea::accurateIntersectionCount()
     else
     {
         // Check that t > 0 for minus solution.
-        if (e>g) minusGood = e>b;
+        if (e>=g) minusGood = e>b;
         else minusGood = A < 0;
 
         // Same for plus solution.
@@ -323,7 +326,7 @@ size_t DrawArea::accurateIntersectionCount()
         // whether t < 1).
         if (plusGood)
         {
-            if (k > g) plusGood = k > b;
+            if (k >= g) plusGood = k > b;
             else plusGood = A < 0;
         }
         if (minusGood)
