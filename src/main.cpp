@@ -73,7 +73,7 @@ struct QBezier
         }
     }
 
-    void draw(sf::RenderWindow& wnd, Colour col);
+    void draw(sf::RenderWindow& wnd, Colour col, float mul);
 
     sf::Vector2f operator()(float t)
     {
@@ -84,19 +84,19 @@ struct QBezier
     }
 };
 
-void QBezier::draw(sf::RenderWindow& wnd, Colour col)
+void QBezier::draw(sf::RenderWindow& wnd, Colour col, float mul)
 {
     float len{0};
     auto d = p2-p1;
     len += std::sqrt(d.x*d.x+d.y*d.y);
     d = p1-p0;
     len += std::sqrt(d.x*d.x+d.y*d.y);
-    size_t subdiv = std::max<size_t>(8, len);
+    size_t subdiv = std::max<size_t>(8, len*mul);
     sf::VertexArray curve(sf::LineStrip, subdiv+1);
     for (size_t i = 0; i <= subdiv; ++i)
     {
         auto t = static_cast<float>(i)/static_cast<float>(subdiv);
-        curve[i].position = (*this)(t);
+        curve[i].position = (*this)(t)*mul;
         curve[i].color = col;
     }
     wnd.draw(curve);
@@ -121,23 +121,23 @@ class DrawArea
 public:
     DrawArea()
     {
-        pos(0) = {100, 100};
-        pos(1) = {400, 400};
-        pos(2) = {700, 100};
-        pos(3) = {400, 200};
+        bezier.p0 = {1, 1};
+        bezier.p1 = {4, 4};
+        bezier.p2 = {7, 1};
+        rayPos = {4, 2};
 
         if (!font.loadFromFile("font.ttf"))
         {
             throw std::runtime_error("Could not load font.");
         }
     }
-    size_t getNearest(sf::Vector2i pos)
+    size_t getNearest(sf::Vector2f pos)
     {
-        int smallest = std::numeric_limits<int>::max();
+        float smallest = std::numeric_limits<float>::max();
         size_t nearest = 0;
         for (size_t i = 0; i < 3; ++i)
         {
-            auto d = sqLen(bezier[i]-pos);
+            auto d = sqLen(sf::Vector2f{bezier[i].x, bezier[i].y}-pos);
             if (d < smallest)
             {
                 nearest = i;
@@ -146,6 +146,10 @@ public:
         }
         if (sqLen(rayPos - pos) < smallest) return 3;
         return nearest;
+    }
+    size_t getNearest(sf::Vector2i pos)
+    {
+        return getNearest(sf::Vector2f{pos.x, pos.y});
     }
 
     struct Intersection
@@ -165,18 +169,37 @@ public:
 
     size_t accurateIntersectionCount();
 
-    sf::Vector2i& pos(size_t i) { return (i==3) ? rayPos : bezier[i]; }
-    const sf::Vector2i& pos(size_t i) const
+    sf::Vector2f pos(size_t i) const
     {
-        return (i==3) ? rayPos : bezier[i];
+        return (i==3) ? rayPos : sf::Vector2f{bezier[i].x, bezier[i].y};
+    }
+
+    void setPos(size_t i, sf::Vector2f pos)
+    {
+        if (i == 3) rayPos = pos;
+        else
+        {
+            bezier[i] = {pos.x, pos.y};
+        }
+    }
+    void setPos(size_t i, sf::Vector2i pos)
+    {
+        if (i == 3) rayPos = {pos.x, pos.y};
+        else
+        {
+            bezier[i] = pos;
+        }
     }
 
     void draw(sf::RenderWindow& wnd, bool isConsistent);
 
+    void setMul(float factor) { mul = factor; }
+
 private:
     sf::Font font;
     QBezier bezier;
-    sf::Vector2i rayPos;
+    sf::Vector2f rayPos;
+    float mul = 10.f;
     void drawBezier(sf::RenderWindow& wnd);
     void drawPoints(sf::RenderWindow& wnd);
     void drawRay(sf::RenderWindow& wnd);
@@ -198,8 +221,9 @@ private:
 std::vector<DrawArea::Intersection> DrawArea::approxIntersections()
 {
     std::vector<Intersection> intersections;
-    auto A = pos(0)-2*pos(1)+pos(2);
-    auto B = 2*(pos(1)-pos(0));
+    auto A = pos(0)-pos(1)-pos(1)+pos(2);
+    auto B = pos(1)-pos(0);
+    B += B;
     auto C = pos(0)-rayPos;
     auto dy = B.y * B.y - 4 * A.y * C.y;
     if (!A.y)
@@ -263,19 +287,18 @@ size_t DrawArea::accurateIntersectionCount()
         return 0 < C && C < -B;
     }
 
-    auto D = B*B-4*A*C;
-
-
-    if (D < 0) return 0;
+    // Note: This expression may look prone to losing precision, but note that
+    // the only non-integer (and thereby non-exact) variable in the expression
+    // is b.
+    if (e*k-g*g > b*A) return 0;
 
     bool minusGood = false;
     bool plusGood = false;
-    if (D == 0)
+    if (e*k-g*g == b*A)
     {
         if (A > 0) plusGood = B < 0 && (-B < 2*A);
         else plusGood = B > 0 && (-B > 2*A);
     }
-
     else
     {
         // Check that t > 0 for minus solution.
@@ -300,7 +323,7 @@ size_t DrawArea::accurateIntersectionCount()
         }
     }
 
-    // Just do it using floating point since doing it exactly means computing a
+    // Just check x using floats since doing it exactly means computing a
     // complicated expression which likely needs 64-bit integers even if all
     // absolute values of the coordinates are less than 2^12. Also, precision is
     // probably not an issue since we only use this to get the x-coordinate of
@@ -308,8 +331,8 @@ size_t DrawArea::accurateIntersectionCount()
     // intersection very close to the ray origin may be missed (or a non-
     // intersection is counted) but since it is very close to the ray origin, it
     // probably isn't visible.
-    float tMinus = (-B - std::sqrt((float)D)) / (float)(2*A);
-    float tPlus  = (-B + std::sqrt((float)D)) / (float)(2*A);
+    float tMinus = (-B - std::sqrt((float)(B*B-4*A*C))) / (float)(2*A);
+    float tPlus  = (-B + std::sqrt((float)(B*B-4*A*C))) / (float)(2*A);
 
     auto d = bezier.p0.x;
     auto f = bezier.p1.x;
@@ -330,13 +353,13 @@ void DrawArea::drawBezier(sf::RenderWindow& wnd)
 
     for (size_t i = 0; i < 3; ++i)
     {
-        curveGuide[i].position = {pos(i).x, pos(i).y};
+        curveGuide[i].position = pos(i) * mul;
         curveGuide[i].color = Colour(0xafafafff);
     }
 
     wnd.draw(curveGuide);
 
-    bezier.draw(wnd, 0x000000ff);
+    bezier.draw(wnd, 0x000000ff, mul);
 }
 
 void DrawArea::drawPoints(sf::RenderWindow& wnd)
@@ -349,11 +372,11 @@ void DrawArea::drawPoints(sf::RenderWindow& wnd)
     text.setFillColor(Colour(0x2f5fafff));
     for (size_t i = 0; i < 4; ++i)
     {
-        point.setPosition(pos(i).x-radius, pos(i).y-radius);
+        point.setPosition(pos(i).x*mul-radius, pos(i).y*mul-radius);
         wnd.draw(point);
         text.setString(toString(pos(i)));
-        text.setPosition(pos(i).x+radius-text.getLocalBounds().left,
-                         pos(i).y+radius-text.getLocalBounds().top);
+        text.setPosition(pos(i).x*mul+radius-text.getLocalBounds().left,
+                         pos(i).y*mul+radius-text.getLocalBounds().top);
         wnd.draw(text);
     }
 }
@@ -361,8 +384,8 @@ void DrawArea::drawPoints(sf::RenderWindow& wnd)
 void DrawArea::drawRay(sf::RenderWindow& wnd)
 {
     sf::VertexArray ray(sf::Lines, 2);
-    ray[0].position = {pos(3).x, pos(3).y};
-    ray[1].position = {wnd.getSize().x, pos(3).y};
+    ray[0].position = pos(3) * mul;
+    ray[1].position = sf::Vector2f{wnd.getSize().x, pos(3).y} * mul;
     ray[0].color = ray[1].color = Colour(0xff6c1dff);
     wnd.draw(ray);
 }
@@ -378,11 +401,11 @@ void DrawArea::drawIntersections(sf::RenderWindow& wnd)
     bool placeAbove = true;
     for (auto& intersection : approxIntersections())
     {
-        point.setPosition(intersection.point.x-radius,
-                           intersection.point.y-radius);
+        point.setPosition(intersection.point.x*mul-radius,
+                           intersection.point.y*mul-radius);
         wnd.draw(point);
         text.setString((std::string)intersection);
-        auto placeAt = intersection.point;
+        auto placeAt = intersection.point*mul;
         if (placeAbove)
         {
             auto dim = text.getLocalBounds();
@@ -391,8 +414,8 @@ void DrawArea::drawIntersections(sf::RenderWindow& wnd)
         }
         else
         {
-            placeAt.x = (int)(intersection.point.x + radius);
-            placeAt.y = (int)(intersection.point.y + radius);
+            placeAt.x = (int)(placeAt.x + radius);
+            placeAt.y = (int)(placeAt.y + radius);
         }
         text.setPosition(placeAt);
         wnd.draw(text);
@@ -418,8 +441,9 @@ void DrawArea::drawInfo(sf::RenderWindow& wnd, bool isConsistent)
     textBuf << "Approx intersections: " << approxIntersections().size() << "\n";
     texts.push_back({textBuf.str(), 16, 0x000000ff});
     textBuf.str({});
-    auto A = pos(0)-2*pos(1)+pos(2);
-    auto B = 2*(pos(1)-pos(0));
+    auto A = pos(0)-pos(1)-pos(1)+pos(2);
+    auto B = pos(1)-pos(0);
+    B += B;
     auto C = pos(0)-rayPos;
     textBuf << "A: " << toString(A) << "\n";
     textBuf << "B: " << toString(B) << "\n";
@@ -495,6 +519,9 @@ int main()
 
     bool isConsistent = true;
 
+    float mul = 50.f;
+    area.setMul(mul);
+
     while (wnd.isOpen())
     {
         if (isConsistent &&
@@ -511,6 +538,10 @@ int main()
         sf::Event evt;
         while (wnd.pollEvent(evt))
         {
+            sf::Vector2f mousepos;
+            mousepos.x = sf::Mouse::getPosition(wnd).x;
+            mousepos.y = sf::Mouse::getPosition(wnd).y;
+            mousepos /= mul;
             bool shouldUpdateDraggedPosition = dragging;
             if (evt.type == sf::Event::Closed)
             {
@@ -527,7 +558,6 @@ int main()
                 evt.type == sf::Event::MouseButtonPressed &&
                 evt.mouseButton.button == sf::Mouse::Left)
             {
-                auto mousepos = sf::Mouse::getPosition(wnd);
                 auto nearest = area.getNearest(mousepos);
                 auto sqDist = sqLen(area.pos(nearest)-mousepos);
                 if (sqDist < 25*25)
@@ -548,10 +578,10 @@ int main()
 
             if (shouldUpdateDraggedPosition)
             {
-                auto desiredPos = sf::Mouse::getPosition(wnd);
-                desiredPos.x = clamp<int>(desiredPos.x, 0, wnd.getSize().x);
-                desiredPos.y = clamp<int>(desiredPos.y, 0, wnd.getSize().y);
-                area.pos(dragIdx) = desiredPos;
+                auto desiredPos = mousepos;
+                desiredPos.x = clamp<float>(desiredPos.x, 0, wnd.getSize().x);
+                desiredPos.y = clamp<float>(desiredPos.y, 0, wnd.getSize().y);
+                area.setPos(dragIdx, desiredPos);
             }
         }
         area.draw(wnd, isConsistent);
