@@ -163,7 +163,7 @@ public:
 
     std::vector<Intersection> approxIntersections();
 
-    size_t exactIntersectionCount();
+    size_t accurateIntersectionCount();
 
     sf::Vector2i& pos(size_t i) { return (i==3) ? rayPos : bezier[i]; }
     const sf::Vector2i& pos(size_t i) const
@@ -243,8 +243,9 @@ std::vector<DrawArea::Intersection> DrawArea::approxIntersections()
     return intersections;
 }
 
-// Note: Currently only tests for line-bezier segment-intersections.
-size_t DrawArea::exactIntersectionCount()
+// Note: This uses floating-point arithmetic in some cases since the exact
+// expressions are too complicated (and possibly requiring very large numbers).
+size_t DrawArea::accurateIntersectionCount()
 {
     auto e = bezier.p0.y;
     auto g = bezier.p1.y;
@@ -255,8 +256,6 @@ size_t DrawArea::exactIntersectionCount()
     auto B = 2*(g-e);
     auto C = e-b;
 
-    auto D = B*B-4*A*C;
-
     if (A == 0)
     {
         if (B == 0) return C == 0;
@@ -264,40 +263,53 @@ size_t DrawArea::exactIntersectionCount()
         return 0 < C && C < -B;
     }
 
-    if (D < 0) return 0;
-    if (D == 0)
-    {
-        if (A > 0) return B < 0 && (-B < 2*A);
-        return B > 0 && (-B > 2*A);
-    }
+    auto D = B*B-4*A*C;
 
+
+    if (D < 0) return 0;
 
     bool minusGood = false;
     bool plusGood = false;
-
-    // sign(e-g) [equiv. e>g, e=g, e<g] and sign(A) can be precomputed.
-
-    // Check that t >= 0 for minus solution.
-    if (e>g) minusGood = e>b;
-    else minusGood = A < 0;
-
-    if (e<g) plusGood = e<b;
-    else plusGood = A > 0;
-
-    // These can also be used instead of the following two tests.
-    //if ((k > g && k <= b) || (k <= g && A >= 0)) plusGood = false;
-    //if ((k < g && k >= b) || (k >= g && A <= 0)) minusGood = false;
-    if (plusGood)
+    if (D == 0)
     {
-        if (k > g) plusGood = k > b;
-        else plusGood = A < 0;
-    }
-    if (minusGood)
-    {
-        if (k < g) minusGood = k < b;
-        else minusGood = A > 0;
+        if (A > 0) plusGood = B < 0 && (-B < 2*A);
+        else plusGood = B > 0 && (-B > 2*A);
     }
 
+    else
+    {
+        // Check that t > 0 for minus solution.
+        if (e>g) minusGood = e>b;
+        else minusGood = A < 0;
+
+        // Same for plus solution.
+        if (e<g) plusGood = e<b;
+        else plusGood = A > 0;
+
+        // Check that it still holds when reversing the curve (in effect testing
+        // whether t < 1).
+        if (plusGood)
+        {
+            if (k > g) plusGood = k > b;
+            else plusGood = A < 0;
+        }
+        if (minusGood)
+        {
+            if (k < g) minusGood = k < b;
+            else minusGood = A > 0;
+        }
+    }
+
+    // Just do it using floating point since doing it exactly means computing a
+    // complicated expression which likely needs 64-bit integers even if all
+    // absolute values of the coordinates are less than 2^12. Also, precision is
+    // probably not an issue since we only use this to get the x-coordinate of
+    // our intersections relative to the ray origin. Yes, it might mean that an
+    // intersection very close to the ray origin may be missed (or a non-
+    // intersection is counted) but since it is very close to the ray origin, it
+    // probably isn't visible.
+    float tMinus = (-B - std::sqrt((float)D)) / (float)(2*A);
+    float tPlus  = (-B + std::sqrt((float)D)) / (float)(2*A);
 
     auto d = bezier.p0.x;
     auto f = bezier.p1.x;
@@ -308,22 +320,8 @@ size_t DrawArea::exactIntersectionCount()
     auto F = 2*(f-d);
     auto G = d-a;
 
-    // The following is just a single bit and can be precomputed.
-    bool minusFirst = (g-e)*(h-f)+(k-g)*(d-f) < 0;
-    if (e < g) minusFirst = !minusFirst;
-
-    bool lowSol = minusGood;
-    bool highSol = plusGood;
-
-    if (!minusFirst)
-    {
-        // The highest t value gives the solution with the lowest x value -
-        // equivalently the minus solution gives the solution with the highest
-        // t value.
-        std::swap(lowSol, highSol);
-    }
-
-    return lowSol+highSol;
+    return (tMinus * (E * tMinus + F) + G >= 0) * minusGood
+           + (tPlus * (E * tPlus + F) + G >= 0) * plusGood;
 }
 
 void DrawArea::drawBezier(sf::RenderWindow& wnd)
@@ -416,7 +414,7 @@ void DrawArea::drawInfo(sf::RenderWindow& wnd, bool isConsistent)
     {
         texts.push_back({"Inconsistent results!!!\n", 24, 0xff0000ff});
     }
-    textBuf << "Exact intersections: " << exactIntersectionCount() << "\n";
+    textBuf << "Accurate intersections: " << accurateIntersectionCount() << "\n";
     textBuf << "Approx intersections: " << approxIntersections().size() << "\n";
     texts.push_back({textBuf.str(), 16, 0x000000ff});
     textBuf.str({});
@@ -500,13 +498,13 @@ int main()
     while (wnd.isOpen())
     {
         if (isConsistent &&
-            area.approxIntersections().size() != area.exactIntersectionCount())
+            area.approxIntersections().size() != area.accurateIntersectionCount())
         {
             isConsistent = false;
             dragging = false;
         }
         if (!isConsistent &&
-            area.approxIntersections().size() == area.exactIntersectionCount())
+            area.approxIntersections().size() == area.accurateIntersectionCount())
         {
             isConsistent = true;
         }
