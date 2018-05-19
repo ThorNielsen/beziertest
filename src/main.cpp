@@ -91,7 +91,7 @@ void QBezier::draw(sf::RenderWindow& wnd, Colour col, float mul)
     len += std::sqrt(d.x*d.x+d.y*d.y);
     d = p1-p0;
     len += std::sqrt(d.x*d.x+d.y*d.y);
-    size_t subdiv = std::max<size_t>(8, len*mul);
+    size_t subdiv = std::max<size_t>(8, len*mul*0.95f);
     sf::VertexArray curve(sf::LineStrip, subdiv+1);
     for (size_t i = 0; i <= subdiv; ++i)
     {
@@ -179,7 +179,7 @@ public:
         if (i == 3) rayPos = pos;
         else
         {
-            bezier[i] = {pos.x, pos.y};
+            bezier[i] = {pos.x+0.5f, pos.y+0.5f};
         }
     }
     void setPos(size_t i, sf::Vector2i pos)
@@ -280,11 +280,21 @@ size_t DrawArea::accurateIntersectionCount()
     auto B = 2*(g-e);
     auto C = e-b;
 
+    auto d = bezier.p0.x;
+    auto f = bezier.p1.x;
+    auto h = bezier.p2.x;
+    auto a = rayPos.x;
+
+    auto E = d-2*f+h;
+    auto F = 2*(f-d);
+    auto G = d-a;
+
     if (A == 0)
     {
-        if (B == 0) return C == 0;
-        if (B > 0) return 0 > C && C > -B;
-        return 0 < C && C < -B;
+        if (B > 0 && !(b > e && C > -B)) return 0;
+        if (!(b < e && C < -B)) return 0;
+        float t = -C / (float)B;
+        return t * (E * t + F) + G >= 0;
     }
 
     // Note: This expression may look prone to losing precision, but note that
@@ -333,15 +343,6 @@ size_t DrawArea::accurateIntersectionCount()
     // probably isn't visible.
     float tMinus = (-B - std::sqrt((float)(B*B-4*A*C))) / (float)(2*A);
     float tPlus  = (-B + std::sqrt((float)(B*B-4*A*C))) / (float)(2*A);
-
-    auto d = bezier.p0.x;
-    auto f = bezier.p1.x;
-    auto h = bezier.p2.x;
-    auto a = rayPos.x;
-
-    auto E = d-2*f+h;
-    auto F = 2*(f-d);
-    auto G = d-a;
 
     return (tMinus * (E * tMinus + F) + G >= 0) * minusGood
            + (tPlus * (E * tPlus + F) + G >= 0) * plusGood;
@@ -560,7 +561,7 @@ int main()
             {
                 auto nearest = area.getNearest(mousepos);
                 auto sqDist = sqLen(area.pos(nearest)-mousepos);
-                if (sqDist < 25*25)
+                if (sqDist < (50/mul)*(50/mul))
                 {
                     dragging = true;
                     dragIdx = nearest;
