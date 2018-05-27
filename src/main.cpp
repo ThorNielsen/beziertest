@@ -294,8 +294,9 @@ size_t DrawArea::accurateIntersectionCount()
 
     if (A == 0)
     {
+        if (!B) return 0;
         if (B > 0 && !(b > e && C > -B)) return 0;
-        if (!(b < e && C < -B)) return 0;
+        if (B < 0 && !(b < e && C < -B)) return 0;
         float t = -C / (float)B;
         return t * (E * t + F) + G >= 0;
     }
